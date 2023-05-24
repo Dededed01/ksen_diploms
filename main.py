@@ -8,7 +8,8 @@ from app import keyboards as kb
 from app import database as db
 from dotenv import load_dotenv
 import os
-# from aiogram.utils.callback_data import CallbackData
+import requests
+from aiogram.utils.callback_data import CallbackData
 
 storage = MemoryStorage()
 load_dotenv()
@@ -21,13 +22,13 @@ async def on_startup(_):
     print('Бот запущен')
 
 
-class registration(StatesGroup):
-    first_name = State()
-    surname = State()
+class Registration(StatesGroup):
+    name = State()
     city = State()
     address = State()
     phone_number = State()
     cancel = State()
+
 
 class NewOrder(StatesGroup):
     type = State()
@@ -36,8 +37,6 @@ class NewOrder(StatesGroup):
     price = State()
     photo = State()
     cancel = State()
-
-
 
 
 # Обработка кнопки 'Отмена'
@@ -49,6 +48,21 @@ async def cancel_handler(message: types.Message, state: FSMContext):
         return
     await state.finish()
     await message.reply('Cancelled.', reply_markup=kb.admin_panel)
+
+
+@dp.message_handler(state='*', commands='Отменить')
+@dp.message_handler(Text(equals='Отменить', ignore_case=True), state='*')
+async def cancel_handler(message: types.Message, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state is None:
+        return
+    await state.finish()
+    if message.from_user.id == int(os.getenv('ADMIN_ID')):
+        await message.answer(f'Вы вернулись в меню!\nЕсли вы хотите переоформить заказ, пожалуйста, нажмите на Корзину', reply_markup=kb.main_admin)
+    else:
+        await message.answer(f'Вы вернулись в меню!\nЕсли вы хотите переоформить заказ, пожалуйста, нажмите на Корзину', reply_markup=kb.main)
+
+
 
 
 # -----------------------------------------------------Команды------------------------------------------------------
@@ -68,20 +82,26 @@ async def cmd_id(message: types.Message):
 
 @dp.message_handler(commands=['menu'])
 async def menu_command(message: types.Message):
-    await db.sql_read(message)
+    await message.answer('Добро пожаловать в меню!', reply_markup=kb.catalog_list_menu)
     # await message.answer(f'Вы выбрали меню!',
     #                      reply_markup=kb.catalog_list)
 
 
 @dp.message_handler(commands='address')
 async def contact(message: types.Message):
-    await message.answer(f'Адрес: г.Протвино, ул. Ленина, д.19 \nРежим работы: вс.- чт. с 10:00 до 21:00 '
-                         f'\nпт.- сб. с 10.00 до 22.00')
+    await message.answer(f'Адрес: г.Протвино, ул. Ленина, д.19 \nРежим работы: \nвс - чт с 10:00 до 21:00\nпт - сб с 10.00 до 22.00')
+    await bot.send_location(message.from_user.id, 54.875035, 37.220140)
 
 
 @dp.message_handler(commands='contacts')
 async def contacts(message: types.Message):
     await message.answer(f'Телефон ресторана: +7 (4967) 74-28-34')
+
+
+@dp.message_handler(commands='social_network')
+async def contacts(message: types.Message):
+    await message.answer(f'Вступайте в наши группы в социальных сетях. Там вся актуальная '
+                         f'информация о новинках и работе ресторана!', reply_markup=kb.social_list)
 
 
 # ----------------------------------------------Главное меню----------------------------------------------
@@ -109,16 +129,18 @@ async def shopcart(message: types.Message):
 
 @dp.message_handler(text='📍 Адрес и режим работы')
 async def contacts(message: types.Message):
-    await message.answer(f'Адрес: г.Протвино, ул. Ленина, д.19 \nРежим работы: вс.- чт. с 10:00 до 21:00 '
-                         f'\nпт.- сб. с 10.00 до 22.00')
+    await message.answer(f'Адрес: г.Протвино, ул. Ленина, д.19 \nРежим работы: \nвс - чт с 10:00 до 21:00\nпт - сб с 10.00 до 22.00')
+    await bot.send_location(message.from_user.id, 54.875035, 37.220140)
 
 
 @dp.message_handler(text='↗️ ВК и Instagram')
 async def contacts(message: types.Message):
     await message.answer(f'Вступайте в наши группы в социальных сетях. Там вся актуальная '
-                         f'информация о новинках и работе ресторана!'
-                         f'\nНаш ВК: https://vk.com/pro_melange'
-                         f'\nНаш Instagram: https://instagram.com/pro_melange?igshid=NTc4MTIwNjQ2YQ==')
+                         f'информация о новинках и работе ресторана!', reply_markup=kb.social_list)
+
+@dp.message_handler(text='❓ Помощь')
+async def contacts(message: types.Message):
+    await message.answer(f'Список команд:\n/menu - открытие меню\n/address - адрес и режим работы ресторана \n/contacts - телефон ресторана\n/social_network - социальные сет')
 
 
 @dp.message_handler(text='🍽 Меню')
@@ -130,64 +152,78 @@ async def menu_command(message: types.Message):
     #                       # f'\nпт.- сб. с 10.00 до 22.00', callback_data=dishes(action='get_all'))
 
 
-# ------------------------------------------------- Часть администратора---------------------------------------
 # Начало регистрации
 @dp.message_handler(commands='registration')
 async def add_name(message: types.Message):
-    await registration.first_name.set()
-    await message.reply(f'Для того, чтобы закончить оформление заказа, пожалуйста, напишите свое имя:')
-
-
-# Ловим первый ответ и записываем имя пользователя
-@dp.message_handler(state=registration.first_name)
-async def add_name(message: types.callback_query, state: FSMContext):
-    async with state.proxy() as data:
-        data['first_name'] = message.text
-    await message.answer(f'Напишите свою фамилию:', reply_markup=kb.cancel)
-    await registration.next()
+    await Registration.name.set()
+    await message.reply(f'Для того, чтобы закончить оформление заказа, пожалуйста, напишите свое имя:', reply_markup=kb.cancel1)
 
 
 # Ловим ответ и записываем фамилию пользователя
-@dp.message_handler(state=registration.surname)
+@dp.message_handler(state=Registration.name)
 async def add_surname(message: types.Message, state: FSMContext):
-    if message.text == 'Отмена':
-        await state.set_state(registration.cancel.state)
+    if message.text == 'Отменить':
+        await state.set_state(Registration.cancel.state)
 
     async with state.proxy() as data:
-        data['surname'] = message.text
-    await message.answer(f'Напишите свой город', reply_markup=kb.cancel)
-    await registration.next()
+        data['name'] = message.text
+    await message.answer(f'Напишите свой город', reply_markup=kb.cancel1)
+    await Registration.next()
 
 
 # Ловим ответ и записываем адрес
-@dp.message_handler(state=registration.city)
-async def add_city(message: types.Message, state: FSMContext):
-    if message.text == 'Отмена':
-        await state.set_state(registration.cancel.state)
-
+@dp.message_handler(content_types=['location'], state=Registration.city)
+async def add_city(message: types.Location, state: FSMContext):
+    if message.text == 'Отменить':
+        await state.set_state(Registration.cancel.state)
     async with state.proxy() as data:
         data['city'] = message.text
-    await message.answer(f'Напишите свой адрес', reply_markup=kb.cancel)
-    await registration.next()
 
+    current_position = (message.location.longitude, message.location.latitude)
+    # создаем строку в виде ДОЛГОТА,ШИРИНА
+    coords = f"{current_position[0]},{current_position[1]}"
+    PARAMS = {
+        "apikey": "0cfe9833-076d-4fac-b5af-94b7b43ff8cf",
+        "format": "json",
+        "lang": "ru_RU",
+        "kind": "house",
+        "geocode": coords
+    }
+    req = requests.get("https://geocode-maps.yandex.ru/1.x?/", params = PARAMS)
+    json_data = req.json()
+    await state.set_state(Registration.phone_number)
+    address_str = json_data["response"]["GeoObjectCollection"]["featureMember"][0]["GeoObject"]["metaDataProperty"][
+        "GeocoderMetaData"]["AddressDetails"]["Country"]["AddressLine"]
+    await message.answer(address_str)
+    await message.answer("Введите телефон")
+
+
+@dp.message_handler(state=Registration.city)
+async def add_city(message: types.Location, state: FSMContext):
+    if message.text == 'Отменить':
+        await state.set_state(Registration.cancel.state)
+    async with state.proxy() as data:
+        data['city'] = message.text
+    await message.answer(f'Напишите свой адрес', reply_markup=kb.cancel1)
+    await Registration.next()
 
 # Ловим ответ и записываем номер телефона
-@dp.message_handler(state=registration.address)
+@dp.message_handler(state=Registration.address)
 async def add_address(message: types.Message, state: FSMContext):
-    if message.text == 'Отмена':
-        await state.set_state(registration.cancel.state)
+    if message.text == 'Отменить':
+        await state.set_state(Registration.cancel.state)
 
     async with state.proxy() as data:
         data['address'] = message.text
-    await message.answer(f'Напишите свой номер телефона')
-    await registration.next()
+    await message.answer(f'Напишите свой номер телефона', reply_markup=kb.cancel1)
+    await Registration.next()
 
 
 # Ловим последний ответ
-@dp.message_handler(state=registration.phone_number)
+@dp.message_handler(state=Registration.phone_number)
 async def add_phone(message: types.Message, state: FSMContext):
-    if message.text == 'Отмена':
-        await state.set_state(registration.cancel.state)
+    if message.text == 'Отменить':
+        await state.set_state(Registration.cancel.state)
 
     async with state.proxy() as data:
         data['phone_number'] = message.text
@@ -208,14 +244,14 @@ async def contacts(message: types.Message):
 async def delivery(message: types.Message):
     shopcart_id = await db.select_not_ordered_shopcart_by_account(message.from_user.id)
     await db.change_order_status('delivery', shopcart_id)
-    #kkkkkk
+    await message.answer(f'Для продолжения регистрации, пожалуйста, нажмите /registration')
 
 
 @dp.message_handler(text='Самовывоз')
 async def pickup(message: types.Message):
     shopcart_id = await db.select_not_ordered_shopcart_by_account(message.from_user.id)
     await db.change_order_status('pickup', shopcart_id)
-    # TODO: ПЕРЕВОД НА РЕГИСТРАЦИЮ
+    await message.answer(f'Для продолжения регистрации, пожалуйста, нажмите /registration')
 
 
 @dp.message_handler(text='Отменить оформление')
@@ -279,6 +315,9 @@ async def add_dish_name(message: types.Message, state: FSMContext):
 # Ловим ответ и записываем описание блюда
 @dp.message_handler(state=NewOrder.desc)
 async def add_dish_price(message: types.Message, state: FSMContext):
+    if message.text == 'Отмена':
+        await state.set_state(Registration.cancel.state)
+
     async with state.proxy() as data:
         data['desc'] = message.text
     await message.answer(f'Напишите цену блюда', reply_markup=kb.cancel)
@@ -288,6 +327,9 @@ async def add_dish_price(message: types.Message, state: FSMContext):
 # Ловим ответ и записываем цену
 @dp.message_handler(state=NewOrder.price)
 async def add_dish_price(message: types.Message, state: FSMContext):
+    if message.text == 'Отмена':
+        await state.set_state(Registration.cancel.state)
+
     async with state.proxy() as data:
         data['price'] = message.text
     await message.answer(f'Отправьте фотографию блюда')
@@ -302,11 +344,15 @@ async def add_dish_photo(message: types.Message):
 # Ловим последний ответ и записываем фото
 @dp.message_handler(content_types=['photo'], state=NewOrder.photo)
 async def add_dish_photo(message: types.Message, state: FSMContext):
+    if message.text == 'Отмена':
+        await state.set_state(Registration.cancel.state)
+
     async with state.proxy() as data:
         data['photo'] = message.photo[0].file_id
     await db.add_dish(state)
     await message.answer('Блюдо успешно добавлено', reply_markup=kb.admin_panel)
     await state.finish()
+
 
 @dp.message_handler(text='Вернуться к главному меню')
 async def cancel(message: types.Message):
@@ -321,6 +367,14 @@ async def add_dish_price(message: types.Message, state: FSMContext):
     else:
         await message.answer(f'Вы вернулись в меню!', reply_markup=kb.main)
 
+
+@dp.message_handler(state=Registration.cancel)
+async def add_dish_price(message: types.Message, state: FSMContext):
+    await state.finish()
+    if message.from_user.id == int(os.getenv('ADMIN_ID')):
+        await message.answer(f'Вы вернулись в меню!', reply_markup=kb.main_admin)
+    else:
+        await message.answer(f'Вы вернулись в меню!', reply_markup=kb.main)
 # @dp.message_handler(text='Отмена')
 # async def cancel_admin(message: types.Message):
 #     if message.from_user.id == int(os.getenv('ADMIN_ID')):
@@ -346,7 +400,6 @@ async def callback_menu_catalog(callback_query: types.CallbackQuery):
 
 @dp.callback_query_handler(lambda c: c.data == 'back_from_catalog')
 async def callback_back_to_menu_catalog(callback_query: types.CallbackQuery):
-    # await callback_query.answer('Категории:', )
     await bot.send_message(callback_query.message.chat.id, 'Категории:', reply_markup=kb.catalog_list_menu)
 
 
@@ -367,9 +420,6 @@ async def callback_query_add_to_shopcart(callback_query: types.CallbackQuery):
 @dp.callback_query_handler(lambda c: c.data and c.data == 'checkout')
 async def callback_query_checkout(callback_query: types.CallbackQuery):
     await callback_query.message.reply('Выберите способ доставки:', reply_markup=kb.delivery_type_buttons)
-
-
-
 
 
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith('delete_from_shopcart_'))

@@ -15,8 +15,7 @@ async def db_start():
     cur.execute("CREATE TABLE IF NOT EXISTS accounts("
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, "
                 "tg_id INTEGER,  "
-                "first_name TEXT, "
-                "surname TEXT, "
+                "name TEXT, "
                 "city TEXT, "
                 "address TEXT, "
                 "phone_number TEXT)")
@@ -54,6 +53,35 @@ async def cmd_start_db(user_id):
         db.commit()
 
 
+# async def add_user(message):
+#     cur.execute("SELECT id FROM accounts WHERE id=?",(message.chat.id,))
+#     user = cur.fetchone()
+#     if not user:
+#         cur.execute("INSERT INTO accounts (name, city, address, phone_number) VALUES(?,?,?,?)")
+#     else:
+#         pass
+#
+#
+# async def add_user_name(message):
+#     cur.execute("UPDATE accounts SET name=? WHERE id=?",(message.text,message.chat.id,))
+#     db.commit()
+#
+#
+# async def add_user_city(message):
+#     cur.execute("UPDATE accounts SET city=? WHERE id=?",(message.text,message.chat.id,))
+#     db.commit()
+#
+#
+# async def add_user_address(message):
+#     cur.execute("UPDATE accounts SET address=? WHERE id=?", (message.text, message.chat.id,))
+#     db.commit()
+#
+#
+# async def add_user_phone(message):
+#     cur.execute("UPDATE accounts SET phone_number=? WHERE id=?", (message.text, message.chat.id,))
+#     db.commit()
+#
+
 async def add_dish(state):
     async with state.proxy() as data:
         cur.execute("INSERT INTO dishes (name, desc, price, photo, kind) VALUES (?, ?, ?, ?, ?)",
@@ -63,8 +91,8 @@ async def add_dish(state):
 
 async def add_registration(state):
     async with state.proxy() as data:
-        cur.execute("INSERT INTO accounts (first_name, surname, city, address, phone_number) VALUES (?, ?, ?, ?, ?)",
-                    (data['first_name'], data['surname'], data['city'], data['address'], data['phone_number']))
+        cur.execute("INSERT INTO accounts (name, city, address, phone_number) VALUES (?, ?, ?, ?)",
+                    (data['name'], data['city'], data['address'], data['phone_number']))
         db.commit()
 
 

@@ -25,6 +25,13 @@ catalog_list_menu.add(InlineKeyboardButton(text='Завтрак', callback_data=
 cancel = ReplyKeyboardMarkup(resize_keyboard=True)
 cancel.add('Отмена')
 
+cancel1 = ReplyKeyboardMarkup(resize_keyboard=True)
+cancel1.add('Отменить')
+
+
 delivery_type_buttons = ReplyKeyboardMarkup(resize_keyboard=True)
 delivery_type_buttons.add("Самовывоз").add("Доставка").add('Отменить оформление')
 
+social_list = InlineKeyboardMarkup(row_width=1)
+social_list.add(InlineKeyboardButton(text='ВК', url='https://vk.com/pro_melange'),
+                 InlineKeyboardButton(text='Instagram*', url= 'https://instagram.com/pro_melange?igshid=NTc4MTIwNjQ2YQ=='))
