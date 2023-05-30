@@ -4,8 +4,8 @@ from aiogram.dispatcher.filters import Text
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.dispatcher import FSMContext
 from aiogram.types import ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
-from app import keyboards as kb
-from app import database as db
+import keyboards as kb
+import database as db
 from dotenv import load_dotenv
 import os
 import requests
@@ -268,6 +268,31 @@ async def del_callback_run(callback_query: types.CallbackQuery):
     await callback_query.answer(text=f'{callback_query.data.replace("del ", "")} удалена.', show_alert=True)
 
 
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith('rem_from_shopcart_'))
+async def callback_query_rem_from_shopcart(callback_query: types.CallbackQuery):
+    account_id = callback_query.from_user.id
+    dish_id = callback_query.data.removeprefix('rem_from_shopcart_')
+    shopcart_id = await db.select_not_ordered_shopcart_by_account(account_id)
+
+    if shopcart_id is None:
+        shopcart_id = await db.create_shopcart(account_id)
+    answer = await db.rem_dish_from_shopcart(dish_id, shopcart_id)
+
+    if answer[3] > 0:
+        # await bot.send_message(callback_query.message.chat.id, f"Количество уменьшено. Теперь в корзине {answer[3]} шт")
+        zhopa = await db.get_dish(dish_id, shopcart_id)
+        await bot.edit_message_caption(chat_id = callback_query.message.chat.id, message_id= callback_query.message.message_id,caption= zhopa,
+                             reply_markup=InlineKeyboardMarkup(row_width=3)
+                             .row(InlineKeyboardButton(f'Добавить еще', callback_data=f'add_to_shopcart_{dish_id}'),
+                             InlineKeyboardButton(f'Убавить', callback_data=f'rem_from_shopcart_{dish_id}'),
+                             InlineKeyboardButton(f'Удалить', callback_data=f'delete_from_shopcart_{dish_id}')))
+
+    else:
+        await db.delete_from_shopcart(dish_id, shopcart_id)
+        await bot.send_message(callback_query.message.chat.id, "Блюдо удалено из корзины")
+    await callback_query.answer()
+
+
 @dp.message_handler(text='Удалить блюдо')
 async def delete_dish(message: types.Message):
     if message.from_user.id == int(os.getenv('ADMIN_ID')):
@@ -422,7 +447,7 @@ async def callback_query_checkout(callback_query: types.CallbackQuery):
     await callback_query.message.reply('Выберите способ доставки:', reply_markup=kb.delivery_type_buttons)
 
 
-@dp.callback_query_handler(lambda c: c.data and c.data.startswith('delete_from_shopcart_'))
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith('delete_from_'))
 async def callback_query_delete_from_shopcart(callback_query: types.CallbackQuery):
     account_id = callback_query.from_user.id
     dish_id = callback_query.data.removeprefix('delete_from_shopcart_')
