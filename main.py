@@ -37,6 +37,7 @@ class NewOrder(StatesGroup):
     price = State()
     photo = State()
     cancel = State()
+    wait_for_count = State()
 
 
 # Обработка кнопки 'Отмена'
@@ -122,7 +123,7 @@ async def shopcart(message: types.Message):
 
     result += f"Итого по чеку: {sum} руб."
 
-    await bot.send_message(message.from_user.id, result, reply_markup=InlineKeyboardMarkup().add(InlineKeyboardButton(f'Оформить заказ', callback_data='checkout')))
+    await bot.send_message(message.from_user.id, result, reply_markup=InlineKeyboardMarkup().add(InlineKeyboardButton(f'Обновить итог', callback_data='checkout_re'),InlineKeyboardMarkup().add(InlineKeyboardButton(f'Оформить заказ', callback_data='checkout'))))
 
 
 
@@ -280,18 +281,61 @@ async def callback_query_rem_from_shopcart(callback_query: types.CallbackQuery):
 
     if answer[3] > 0:
         # await bot.send_message(callback_query.message.chat.id, f"Количество уменьшено. Теперь в корзине {answer[3]} шт")
-        zhopa = await db.get_dish(dish_id, shopcart_id)
-        await bot.edit_message_caption(chat_id = callback_query.message.chat.id, message_id= callback_query.message.message_id,caption= zhopa,
+        updated_text = await db.get_dish(dish_id, shopcart_id)
+        await bot.edit_message_text(text = updated_text, chat_id = callback_query.message.chat.id, message_id= callback_query.message.message_id,
                              reply_markup=InlineKeyboardMarkup(row_width=3)
-                             .row(InlineKeyboardButton(f'Добавить еще', callback_data=f'add_to_shopcart_{dish_id}'),
-                             InlineKeyboardButton(f'Убавить', callback_data=f'rem_from_shopcart_{dish_id}'),
-                             InlineKeyboardButton(f'Удалить', callback_data=f'delete_from_shopcart_{dish_id}')))
+                                    .row(InlineKeyboardButton(f'➖', callback_data=f'rem_from_shopcart_{dish_id}'),
+                                         InlineKeyboardButton(f'Ввести кол-во',
+                                                              callback_data=f'insert_in_shopcart_{dish_id}'),
+                                         InlineKeyboardButton(f'➕', callback_data=f'add_to_shopcart_{dish_id}')))
 
     else:
         await db.delete_from_shopcart(dish_id, shopcart_id)
-        await bot.send_message(callback_query.message.chat.id, "Блюдо удалено из корзины")
+        await bot.edit_message_text(text = "Блюдо удалено из корзины", chat_id= callback_query.message.chat.id, message_id= callback_query.message.message_id, reply_markup=InlineKeyboardMarkup() .add(InlineKeyboardButton(f'Вернуть блюдо', callback_data=f'add_to_shopcart_{dish_id}')))
     await callback_query.answer()
 
+
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith('insert_in_shopcart_'))
+async def callback_query_ask_to_insert_in_shopcart(callback_query: types.CallbackQuery, state: FSMContext):
+    await bot.answer_callback_query(callback_query.id, "Пожалуйста,введите число")
+    account_id = callback_query.from_user.id
+    dish_id = callback_query.data.removeprefix('insert_in_shopcart_')
+    await state.update_data(dish_id=dish_id)
+    await state.update_data(account_id=account_id)
+    shopcart_id = await db.select_not_ordered_shopcart_by_account(account_id)
+    message_id = callback_query.message.message_id
+    chat_id = callback_query.message.chat.id
+    await state.update_data(chat_id = chat_id)
+    await state.update_data(message_id=message_id)
+    await state.update_data(shopcart_id=shopcart_id)
+    await state.set_state(NewOrder.wait_for_count.state)
+    await callback_query.answer()
+
+
+@dp.message_handler(state=NewOrder.wait_for_count)
+async def callback_query_insert_in_shopcart(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    dish_id = data['dish_id']
+    account_id = data['account_id']
+    shopcart_id = data['shopcart_id']
+    message_id = data['message_id']
+    chat_id = data['chat_id']
+    if shopcart_id is None:
+        shopcart_id = await db.create_shopcart(account_id)
+
+    try:
+        if int(message.text) > 0:
+            await db.insert_dish_to_shopcart(dish_id, shopcart_id, message.text)
+    except:
+        await bot.send_message(message.from_user.id, "Пожалуйста,введите число")
+    updated_text = await db.get_dish(dish_id, shopcart_id)
+    await bot.edit_message_text(text = updated_text, chat_id = chat_id,
+                                message_id = message_id,
+                                reply_markup=InlineKeyboardMarkup(row_width=3)
+                                .row(InlineKeyboardButton(f'➖', callback_data=f'rem_from_shopcart_{dish_id}'),
+                                     InlineKeyboardButton(f'Ввести кол-во',
+                                                          callback_data=f'insert_in_shopcart_{dish_id}'),
+                                     InlineKeyboardButton(f'➕', callback_data=f'add_to_shopcart_{dish_id}')))
 
 @dp.message_handler(text='Удалить блюдо')
 async def delete_dish(message: types.Message):
@@ -435,10 +479,14 @@ async def callback_query_add_to_shopcart(callback_query: types.CallbackQuery):
     shopcart_id = await db.select_not_ordered_shopcart_by_account(account_id)
     if shopcart_id is None:
         shopcart_id = await db.create_shopcart(account_id)
-
     await db.add_dish_to_shopcart(dish_id, shopcart_id)
-
-    await bot.send_message(callback_query.message.chat.id, 'Вы добавили блюдо!')
+    updated_text = await db.get_dish(dish_id, shopcart_id)
+    await bot.edit_message_text(text = updated_text, chat_id = callback_query.message.chat.id, message_id= callback_query.message.message_id,
+                             reply_markup=InlineKeyboardMarkup(row_width=3)
+                                .row(InlineKeyboardButton(f'➖', callback_data=f'rem_from_shopcart_{dish_id}'),
+                                     InlineKeyboardButton(f'Ввести кол-во',
+                                                          callback_data=f'insert_in_shopcart_{dish_id}'),
+                                     InlineKeyboardButton(f'➕', callback_data=f'add_to_shopcart_{dish_id}')))
     await callback_query.answer()
 
 
@@ -447,24 +495,24 @@ async def callback_query_checkout(callback_query: types.CallbackQuery):
     await callback_query.message.reply('Выберите способ доставки:', reply_markup=kb.delivery_type_buttons)
 
 
-@dp.callback_query_handler(lambda c: c.data and c.data.startswith('delete_from_'))
-async def callback_query_delete_from_shopcart(callback_query: types.CallbackQuery):
-    account_id = callback_query.from_user.id
-    dish_id = callback_query.data.removeprefix('delete_from_shopcart_')
-    shopcart_id = await db.select_not_ordered_shopcart_by_account(account_id)
-    if shopcart_id is None:
-        await db.create_shopcart(account_id)
-        await bot.send_message(callback_query.message.chat.id, 'Блюда нет в корзине!')
-        await callback_query.answer()
-        return
-
-    check_is_delete = await db.delete_from_shopcart(dish_id, shopcart_id)
-    if not check_is_delete:
-        await bot.send_message(callback_query.message.chat.id, 'Блюда нет в корзине!')
-    else:
-        await bot.send_message(callback_query.message.chat.id, 'Вы удалили блюдо!')
-
-    await callback_query.answer()
+# @dp.callback_query_handler(lambda c: c.data and c.data.startswith('delete_from_'))
+# async def callback_query_delete_from_shopcart(callback_query: types.CallbackQuery):
+#     account_id = callback_query.from_user.id
+#     dish_id = callback_query.data.removeprefix('delete_from_shopcart_')
+#     shopcart_id = await db.select_not_ordered_shopcart_by_account(account_id)
+#     if shopcart_id is None:
+#         await db.create_shopcart(account_id)
+#         await bot.send_message(callback_query.message.chat.id, 'Блюда нет в корзине!')
+#         await callback_query.answer()
+#         return
+#
+#     check_is_delete = await db.delete_from_shopcart(dish_id, shopcart_id)
+#     if not check_is_delete:
+#         await bot.send_message(callback_query.message.chat.id, 'Блюда нет в корзине!')
+#     else:
+#         await bot.send_message(callback_query.message.chat.id, 'Вы удалили блюдо!')
+#
+#     await callback_query.answer()
 
 
 @dp.callback_query_handler()

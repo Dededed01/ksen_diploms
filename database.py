@@ -122,9 +122,9 @@ async def get_dish(dish_id, shopcart_id):
     data = cur.execute("SELECT d.name, d.desc, d.price, d.photo, ds.count, d.i_id FROM dishes_to_shopcart ds JOIN "
                        "dishes d ON "
                        "ds.dish_id == d.i_id WHERE shopcart_id == ?", (shopcart_id,)).fetchall()
-    for dish in data:
-        if dish[5] == int(dish_id):
-            return f'{dish[0]}\nОписание: {dish[1]}\nЦена: {dish[2]}\nКоличество: {dish[4]}'
+    for ret in data:
+        if ret[5] == int(dish_id):
+            return f'{ret[0]}\nЦена: {ret[2]} * {ret[4]} ед. = {ret[2]*ret[4]}'
 async def select_not_ordered_shopcart_by_account(account_id):
     shopcart = cur.execute('SELECT * FROM shopcart WHERE account_id == ? and ordered == 0', (account_id,)).fetchone()
     if not shopcart:
@@ -150,6 +150,17 @@ async def add_dish_to_shopcart(dish_id, shopcart_id):
         db.commit()
     else:
         cur.execute("UPDATE dishes_to_shopcart SET count = count + 1 WHERE id = ?", (dish_in_shopcart[0],))
+        db.commit()
+
+async def insert_dish_to_shopcart(dish_id, shopcart_id, count):
+    dish_in_shopcart = cur.execute("SELECT * FROM dishes_to_shopcart WHERE dish_id = ? AND shopcart_id = ?",
+                                   (dish_id, shopcart_id)).fetchone()
+    if not dish_in_shopcart:
+        cur.execute("INSERT INTO dishes_to_shopcart (dish_id, shopcart_id, count) VALUES (?, ?, "
+                    "?)", (dish_id, shopcart_id, count))
+        db.commit()
+    else:
+        cur.execute("UPDATE dishes_to_shopcart SET count = ? WHERE id = ?", (count, dish_in_shopcart[0]))
         db.commit()
 
 async def rem_dish_from_shopcart(dish_id, shopcart_id):
@@ -181,11 +192,10 @@ async def read_dishes_in_shopcart(account_id, message):
                        "ds.dish_id == d.i_id WHERE shopcart_id == ?", (shopcart_id,)).fetchall()
 
     for ret in data:
-        await bot.send_photo(message.chat.id, ret[3], f'{ret[0]}\nОписание: {ret[1]}\nЦена: {ret[2]}\nКоличество: {ret[4]}',
-                             reply_markup=InlineKeyboardMarkup(row_width=3)
-                             .row(InlineKeyboardButton(f'Добавить еще', callback_data=f'add_to_shopcart_{ret[5]}'),
-                             InlineKeyboardButton(f'Убавить', callback_data=f'rem_from_shopcart_{ret[5]}'),
-                             InlineKeyboardButton(f'Удалить', callback_data=f'delete_from_shopcart_{ret[5]}')))
+        await bot.send_message(message.chat.id, f'{ret[0]}\nЦена: {ret[2]} * {ret[4]} ед. = {ret[2]*ret[4]}',
+                               reply_markup=InlineKeyboardMarkup(row_width=3)
+                             .row(InlineKeyboardButton(f'➖', callback_data=f'rem_from_shopcart_{ret[5]}'),
+                             InlineKeyboardButton(f'Ввести кол-во', callback_data=f'insert_in_shopcart_{ret[5]}'), InlineKeyboardButton(f'➕', callback_data=f'add_to_shopcart_{ret[5]}')))
 
     return data
 
