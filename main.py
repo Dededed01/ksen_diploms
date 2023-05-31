@@ -38,6 +38,7 @@ class NewOrder(StatesGroup):
     photo = State()
     cancel = State()
     wait_for_count = State()
+    samovoz = State()
 
 
 # Обработка кнопки 'Отмена'
@@ -112,7 +113,7 @@ async def contacts(message: types.Message):
 
 
 @dp.message_handler(text='🛍 Корзина')
-async def shopcart(message: types.Message):
+async def shopcart(message: types.Message, state: FSMContext):
     dishes = await db.read_dishes_in_shopcart(message.from_user.id, message)
     result = ""
     sum = 0
@@ -122,10 +123,39 @@ async def shopcart(message: types.Message):
     result += "\n"
 
     result += f"Итого по чеку: {sum} руб."
+    await state.update_data(refresh_chat_id=message.chat.id)
+    await bot.send_message(message.from_user.id, result,
+                           reply_markup=InlineKeyboardMarkup()
+                           .add(InlineKeyboardButton(text= 'Обновить итог', callback_data=f'result_refresh_{message.from_user.id}'))
+                           .add(InlineKeyboardButton(text= 'Оформить заказ', callback_data='checkout')))
 
-    await bot.send_message(message.from_user.id, result, reply_markup=InlineKeyboardMarkup().add(InlineKeyboardButton(f'Обновить итог', callback_data='checkout_re'),InlineKeyboardMarkup().add(InlineKeyboardButton(f'Оформить заказ', callback_data='checkout'))))
 
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith('result_refresh_'))
+async def callback_query_refresh_shopcart(callback_query: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    user_id = data['refresh_chat_id']
+    shopcart_id = await db.select_not_ordered_shopcart_by_account(user_id)
+    message_id = callback_query.data.removeprefix('result_refresh_')
+    data = db.cur.execute("SELECT d.name, d.desc, d.price, d.photo, ds.count, d.i_id FROM dishes_to_shopcart ds JOIN "
+                       "dishes d ON "
+                       "ds.dish_id == d.i_id WHERE shopcart_id == ?", (shopcart_id,)).fetchall()
+    result = ""
+    sum = 0
+    for dish in data:
+        sum += int(dish[4]) * int(dish[2])
+        result += f"{dish[0]}: {dish[4]} * {dish[2]} = {int(dish[4]) * int(dish[2])}\n"
+    result += "\n"
 
+    result += f"Итого по чеку: {sum} руб."
+
+    try:
+        await bot.edit_message_text(result, callback_query.message.chat.id, callback_query.message.message_id,
+                           reply_markup=InlineKeyboardMarkup()
+                           .add(InlineKeyboardButton(text='Обновить итог',
+                                                     callback_data=f'result_refresh_{message_id}'))
+                           .add(InlineKeyboardButton(text='Оформить заказ', callback_data='checkout')))
+    finally:
+        await callback_query.answer()
 
 
 @dp.message_handler(text='📍 Адрес и режим работы')
@@ -208,6 +238,7 @@ async def add_city(message: types.Location, state: FSMContext):
     await message.answer(f'Напишите свой адрес', reply_markup=kb.cancel1)
     await Registration.next()
 
+
 # Ловим ответ и записываем номер телефона
 @dp.message_handler(state=Registration.address)
 async def add_address(message: types.Message, state: FSMContext):
@@ -249,10 +280,22 @@ async def delivery(message: types.Message):
 
 
 @dp.message_handler(text='Самовывоз')
-async def pickup(message: types.Message):
+async def pickup(message: types.Message, state: FSMContext):
     shopcart_id = await db.select_not_ordered_shopcart_by_account(message.from_user.id)
     await db.change_order_status('pickup', shopcart_id)
-    await message.answer(f'Для продолжения регистрации, пожалуйста, нажмите /registration')
+    await message.answer(f'Как к вам обращаться?')
+    await state.set_state(NewOrder.samovoz.state)
+
+
+@dp.message_handler(state=NewOrder.samovoz)
+async def pickup(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['name'] = message.text
+    shopcart_id = await db.select_not_ordered_shopcart_by_account(message.from_user.id)
+    await db.change_order_status('pickup', shopcart_id)
+    await message.answer(
+        f'Адрес для самовывоза: г.Протвино, ул. Ленина, д.19\nВремя готовности заказа: {await db.time_counter(shopcart_id)} минут\nДля получения заказа назовите код: {message.from_user.id}')
+    await bot.send_location(message.from_user.id, 54.875035, 37.220140)
 
 
 @dp.message_handler(text='Отменить оформление')
@@ -263,10 +306,13 @@ async def contacts(message: types.Message):
         await message.answer(f'Вы вернулись в меню!', reply_markup=kb.main)
 
 
-@dp.callback_query_handler(lambda x: x.data and x.data.startswith('del '))
+@dp.callback_query_handler(lambda x: x.data and x.data.startswith('delete_from_shopcart_'))
 async def del_callback_run(callback_query: types.CallbackQuery):
-    await db.delete_dish(callback_query.data.replace('del ', ''))
-    await callback_query.answer(text=f'{callback_query.data.replace("del ", "")} удалена.', show_alert=True)
+    account_id = callback_query.from_user.id
+    dish_id = callback_query.data.removeprefix('delete_from_shopcart_')
+    shopcart_id = await db.select_not_ordered_shopcart_by_account(account_id)
+    await db.delete_from_shopcart(dish_id, shopcart_id)
+    await callback_query.answer(text=f'Блюдо удалено', show_alert=True)
 
 
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith('rem_from_shopcart_'))
@@ -287,7 +333,7 @@ async def callback_query_rem_from_shopcart(callback_query: types.CallbackQuery):
                                     .row(InlineKeyboardButton(f'➖', callback_data=f'rem_from_shopcart_{dish_id}'),
                                          InlineKeyboardButton(f'Ввести кол-во',
                                                               callback_data=f'insert_in_shopcart_{dish_id}'),
-                                         InlineKeyboardButton(f'➕', callback_data=f'add_to_shopcart_{dish_id}')))
+                                         InlineKeyboardButton(f'➕', callback_data=f'plus_to_shopcart_{dish_id}')))
 
     else:
         await db.delete_from_shopcart(dish_id, shopcart_id)
@@ -472,10 +518,10 @@ async def callback_back_to_menu_catalog(callback_query: types.CallbackQuery):
     await bot.send_message(callback_query.message.chat.id, 'Категории:', reply_markup=kb.catalog_list_menu)
 
 
-@dp.callback_query_handler(lambda c: c.data and c.data.startswith('add_to_shopcart_'))
-async def callback_query_add_to_shopcart(callback_query: types.CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith('plus_to_shopcart_'))
+async def callback_query_plus_to_shopcart(callback_query: types.CallbackQuery):
     account_id = callback_query.from_user.id
-    dish_id = callback_query.data.removeprefix('add_to_shopcart_')
+    dish_id = callback_query.data.removeprefix('plus_to_shopcart_')
     shopcart_id = await db.select_not_ordered_shopcart_by_account(account_id)
     if shopcart_id is None:
         shopcart_id = await db.create_shopcart(account_id)
@@ -486,8 +532,18 @@ async def callback_query_add_to_shopcart(callback_query: types.CallbackQuery):
                                 .row(InlineKeyboardButton(f'➖', callback_data=f'rem_from_shopcart_{dish_id}'),
                                      InlineKeyboardButton(f'Ввести кол-во',
                                                           callback_data=f'insert_in_shopcart_{dish_id}'),
-                                     InlineKeyboardButton(f'➕', callback_data=f'add_to_shopcart_{dish_id}')))
+                                     InlineKeyboardButton(f'➕', callback_data=f'plus_to_shopcart_{dish_id}')))
     await callback_query.answer()
+
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith('add_to_shopcart_'))
+    async def callback_query_add_to_shopcart(callback_query: types.CallbackQuery):
+        account_id = callback_query.from_user.id
+        dish_id = callback_query.data.removeprefix('add_to_shopcart_')
+        shopcart_id = await db.select_not_ordered_shopcart_by_account(account_id)
+        if shopcart_id is None:
+            shopcart_id = await db.create_shopcart(account_id)
+        await db.add_dish_to_shopcart(dish_id, shopcart_id)
+        await callback_query.answer()
 
 
 @dp.callback_query_handler(lambda c: c.data and c.data == 'checkout')
@@ -495,24 +551,7 @@ async def callback_query_checkout(callback_query: types.CallbackQuery):
     await callback_query.message.reply('Выберите способ доставки:', reply_markup=kb.delivery_type_buttons)
 
 
-# @dp.callback_query_handler(lambda c: c.data and c.data.startswith('delete_from_'))
-# async def callback_query_delete_from_shopcart(callback_query: types.CallbackQuery):
-#     account_id = callback_query.from_user.id
-#     dish_id = callback_query.data.removeprefix('delete_from_shopcart_')
-#     shopcart_id = await db.select_not_ordered_shopcart_by_account(account_id)
-#     if shopcart_id is None:
-#         await db.create_shopcart(account_id)
-#         await bot.send_message(callback_query.message.chat.id, 'Блюда нет в корзине!')
-#         await callback_query.answer()
-#         return
-#
-#     check_is_delete = await db.delete_from_shopcart(dish_id, shopcart_id)
-#     if not check_is_delete:
-#         await bot.send_message(callback_query.message.chat.id, 'Блюда нет в корзине!')
-#     else:
-#         await bot.send_message(callback_query.message.chat.id, 'Вы удалили блюдо!')
-#
-#     await callback_query.answer()
+
 
 
 @dp.callback_query_handler()

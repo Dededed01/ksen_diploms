@@ -101,12 +101,22 @@ async def sql_read(message):
         await bot.send_photo(message.from_user.id, ret[4], f'{ret[1]}\nОписание: {ret[2]}\nЦена: {ret[3]} ')
 
 
+async def time_counter(shopcart_id):
+    data = cur.execute("SELECT d.name, d.desc, d.price, d.photo, ds.count, d.i_id FROM dishes_to_shopcart ds JOIN "
+                       "dishes d ON "
+                       "ds.dish_id == d.i_id WHERE shopcart_id == ?", (shopcart_id,)).fetchall()
+    count = 0
+    for ret in data:
+        count+=ret[4]
+    return count*5
+
+
 async def read_dishes_by_kind(kind, message):
     data = cur.execute(f'SELECT * FROM dishes WHERE kind == ?', (kind,)).fetchall()
     for ret in data:
         await bot.send_photo(message.chat.id, ret[4], f'{ret[1]}\nОписание: {ret[2]}\nЦена: {ret[3]}',
                              reply_markup=InlineKeyboardMarkup()
-                             .add(InlineKeyboardButton(f'Добавить в корзину', callback_data=f'add_to_shopcart_{ret[0]}'))
+                             .add(InlineKeyboardButton(f'Добавить в корзину', callback_data=f'plus_to_shopcart_{ret[0]}'))
                              .add(InlineKeyboardButton(f'Удалить', callback_data=f'delete_from_shopcart_{ret[0]}')))
 
 async def sql_read2():
@@ -195,7 +205,7 @@ async def read_dishes_in_shopcart(account_id, message):
         await bot.send_message(message.chat.id, f'{ret[0]}\nЦена: {ret[2]} * {ret[4]} ед. = {ret[2]*ret[4]}',
                                reply_markup=InlineKeyboardMarkup(row_width=3)
                              .row(InlineKeyboardButton(f'➖', callback_data=f'rem_from_shopcart_{ret[5]}'),
-                             InlineKeyboardButton(f'Ввести кол-во', callback_data=f'insert_in_shopcart_{ret[5]}'), InlineKeyboardButton(f'➕', callback_data=f'add_to_shopcart_{ret[5]}')))
+                             InlineKeyboardButton(f'Ввести кол-во', callback_data=f'insert_in_shopcart_{ret[5]}'), InlineKeyboardButton(f'➕', callback_data=f'plus_to_shopcart_{ret[5]}')))
 
     return data
 
